@@ -51,25 +51,23 @@
       for (const entry of entries) {
         if (!entry.hadRecentInput) {
           clsValue += entry.value;
-          if (clsSources.length < 5) {
-            clsSources.push({
-              value: entry.value,
-              startTime: entry.startTime,
-              sources: entry.sources
-                ? entry.sources.map((s) => ({
-                    node: s.node ? s.node.nodeName : null,
-                    currentRect: s.currentRect
-                      ? {
-                          top: s.currentRect.top,
-                          left: s.currentRect.left,
-                          width: s.currentRect.width,
-                          height: s.currentRect.height,
-                        }
-                      : null,
-                  }))
-                : [],
-            });
-          }
+          clsSources.push({
+            value: entry.value,
+            startTime: entry.startTime,
+            sources: entry.sources
+              ? entry.sources.map((s) => ({
+                  node: s.node ? s.node.nodeName : null,
+                  currentRect: s.currentRect
+                    ? {
+                        top: s.currentRect.top,
+                        left: s.currentRect.left,
+                        width: s.currentRect.width,
+                        height: s.currentRect.height,
+                      }
+                    : null,
+                }))
+              : [],
+          });
         }
       }
     });
@@ -117,7 +115,7 @@
     try {
       const obs = new PerformanceObserver((list) => callback(list.getEntries()));
       obs.observe({ type, buffered: true, ...options });
-      observers.push(obs);
+      observers.push({ obs, callback });
     } catch (_) {
       // Observer type not supported – ignore
     }
@@ -125,8 +123,13 @@
 
   function stopObservers() {
     active = false;
-    for (const obs of observers) {
-      try { obs.disconnect(); } catch (_) {}
+    for (const { obs, callback } of observers) {
+      try {
+        // Flush any buffered entries that haven't been delivered yet
+        const remaining = obs.takeRecords();
+        if (remaining.length > 0) callback(remaining);
+        obs.disconnect();
+      } catch (_) {}
     }
     observers = [];
   }
@@ -152,6 +155,11 @@
     if (interactionMap.size > 0) {
       derivedInp = Math.max(...interactionMap.values());
     }
+
+    // Top-10 individual interaction durations (sorted descending) for future INP proxy
+    const interactionDurations = [...interactionMap.values()]
+      .sort((a, b) => b - a)
+      .slice(0, 10);
 
     // Navigation timing
     const navEntries = performance.getEntriesByType("navigation");
@@ -195,12 +203,18 @@
 
     const pageHostname = location.hostname;
 
+    // Top-5 CLS shift entries by value (not insertion order)
+    const topClsSources = [...clsSources]
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+
     return {
       lcp: lcpValue,
       lcpElement,
       cls: clsValue,
-      clsSources,
+      clsSources: topClsSources,
       inp: derivedInp,
+      interactionDurations,
       fcp: fcpValue,
       ttfb,
       dcl,
