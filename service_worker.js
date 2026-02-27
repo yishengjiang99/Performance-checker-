@@ -47,14 +47,16 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 
   switch (method) {
     case "Network.requestWillBeSent": {
-      const { requestId, request, initiator } = params;
+      const { requestId, request, initiator, timestamp } = params;
       const domain = domainOf(request.url);
       session.requestsTotal++;
       session.requestMap.set(requestId, {
         url: request.url,
         domain,
         type: initiator?.type ?? "other",
+        resourceType: params.type ?? null,  // CDP resource type (Script, Stylesheet, Image…)
         startMs: Date.now(),
+        startTimestamp: timestamp ?? null,  // CDP MonotonicTime (seconds)
       });
       break;
     }
@@ -63,10 +65,9 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       const { requestId, response } = params;
       const req = session.requestMap.get(requestId);
       if (req) {
-        if (response.fromDiskCache || response.fromPrefetchCache || response.fromServiceWorker) {
-          session.cacheHits++;
-        }
-        // Attach response info for later
+        const cached = response.fromDiskCache || response.fromPrefetchCache || response.fromServiceWorker;
+        if (cached) session.cacheHits++;
+        req.fromCache = !!cached;
         req.mimeType = response.mimeType ?? "";
         req.status = response.status;
         req.timing = response.timing ?? null;
@@ -75,7 +76,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     }
 
     case "Network.loadingFinished": {
-      const { requestId, encodedDataLength } = params;
+      const { requestId, encodedDataLength, timestamp } = params;
       const req = session.requestMap.get(requestId);
       if (req) {
         const bytes = encodedDataLength || 0;
@@ -88,6 +89,10 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
         d.requests++;
         d.bytes += bytes;
         req.transferBytes = bytes;
+        // Prefer CDP MonotonicTime delta for accuracy; fall back to Date.now() delta
+        req.durationMs = (timestamp != null && req.startTimestamp != null)
+          ? (timestamp - req.startTimestamp) * 1000
+          : Date.now() - req.startMs;
       }
       break;
     }
@@ -125,11 +130,67 @@ chrome.debugger.onDetach.addListener((source) => {
   sessions.delete(source.tabId);
 });
 
+// ── Tab lifecycle: clean up sessions when tabs close or navigate ───────────────
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (sessions.has(tabId)) {
+    detachDebugger(tabId).catch(() => {});
+    sessions.delete(tabId);
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // If the tab navigates away (not a cold-load reload we triggered), clean up
+  if (changeInfo.status === "loading" && sessions.has(tabId)) {
+    const session = sessions.get(tabId);
+    if (!session.coldLoad) {
+      detachDebugger(tabId).catch(() => {});
+      sessions.delete(tabId);
+    }
+  }
+});
+
 // ── Helper: domain extraction ──────────────────────────────────────────────────
 
 function domainOf(url) {
   try { return new URL(url).hostname; }
   catch (_) { return null; }
+}
+
+// ── Helper: consistent tab getter (avoids relying on promise-ified callback) ──
+
+function getTab(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError) resolve(null);
+      else resolve(tab);
+    });
+  });
+}
+
+// ── Helper: classify a request's MIME type / CDP resource type ────────────────
+
+function classifyResourceType(resourceType, mimeType) {
+  if (resourceType) {
+    const rt = resourceType.toLowerCase();
+    if (rt === "script") return "script";
+    if (rt === "stylesheet") return "css";
+    if (rt === "image" || rt === "media") return "img";
+    if (rt === "font") return "font";
+    if (rt === "xhr" || rt === "fetch") return "xhr/fetch";
+  }
+  // Fall back to MIME type
+  const m = (mimeType || "").split(";")[0].trim().toLowerCase();
+  if (m.includes("javascript") || m === "application/ecmascript") return "script";
+  if (m === "text/css") return "css";
+  if (m.startsWith("image/") || m.startsWith("video/") || m.startsWith("audio/")) return "img";
+  if (
+    m.startsWith("font/") ||
+    m === "application/font-woff" ||
+    m === "application/font-woff2" ||
+    m.includes("opentype")
+  ) return "font";
+  return "other";
 }
 
 // ── CDP helpers ────────────────────────────────────────────────────────────────
@@ -266,40 +327,42 @@ async function stopMeasurement(tabId) {
   const session = getSession(tabId);
   if (!session) throw new Error("No active measurement for this tab.");
 
-  // Stop observers in page context
   let pageMetrics = {};
-  try {
-    const resp = await sendToTab(tabId, { type: "GET_METRICS" });
-    if (resp && resp.ok) pageMetrics = resp.metrics;
-    await sendToTab(tabId, { type: "STOP_OBSERVERS" });
-  } catch (_) {}
-
-  // Stop tracing if active
   let traceInfo = { captured: false };
-  if (session.traceEnabled && session.traceChunks.length === 0) {
+
+  try {
+    // Stop observers in page context
     try {
-      await cdpSend(tabId, "Tracing.end");
-      // Wait briefly for Tracing.tracingComplete event
-      await new Promise((r) => setTimeout(r, 500));
+      const resp = await sendToTab(tabId, { type: "GET_METRICS" });
+      if (resp && resp.ok) pageMetrics = resp.metrics;
+      await sendToTab(tabId, { type: "STOP_OBSERVERS" });
     } catch (_) {}
-  }
-  if (session.traceChunks.length > 0) {
-    traceInfo = {
-      captured: true,
-      sizeBytes: session.traceSize,
-      downloadAvailable: true,
-      chunks: session.traceChunks,
-    };
+
+    // Stop tracing if active
+    if (session.traceEnabled && session.traceChunks.length === 0) {
+      try {
+        await cdpSend(tabId, "Tracing.end");
+        // Wait briefly for Tracing.tracingComplete event
+        await new Promise((r) => setTimeout(r, 500));
+      } catch (_) {}
+    }
+    if (session.traceChunks.length > 0) {
+      traceInfo = {
+        captured: true,
+        sizeBytes: session.traceSize,
+        downloadAvailable: true,
+        chunks: session.traceChunks,
+      };
+    }
+  } finally {
+    // Always detach debugger and remove session, even if something above throws
+    await detachDebugger(tabId);
+    sessions.delete(tabId);
   }
 
-  // Detach debugger
-  await detachDebugger(tabId);
-  sessions.delete(tabId);
-
-  // Build network data
-  const pageHost = domainOf(
-    (await chrome.tabs.get(tabId).catch(() => ({ url: "" }))).url
-  );
+  // Build network data from CDP-captured request info
+  const tab = await getTab(tabId);
+  const pageHost = domainOf(tab?.url ?? "");
 
   const domainList = Array.from(session.domainMap.values()).map((d) => ({
     ...d,
@@ -310,14 +373,35 @@ async function stopMeasurement(tabId) {
   const cacheHitRate =
     session.requestsTotal > 0 ? session.cacheHits / session.requestsTotal : null;
 
+  // Derive byType and slowest from the per-request CDP data
+  const byTypeMap = {};
+  const cdpRequests = [];
+  for (const req of session.requestMap.values()) {
+    if (req.durationMs == null) continue; // request never finished
+    const type = classifyResourceType(req.resourceType, req.mimeType);
+    if (!byTypeMap[type]) byTypeMap[type] = { type, requests: 0, bytes: 0 };
+    byTypeMap[type].requests++;
+    byTypeMap[type].bytes += req.transferBytes || 0;
+    cdpRequests.push({
+      url: req.url,
+      domain: req.domain,
+      type,
+      durationMs: req.durationMs,
+      transferBytes: req.transferBytes || 0,
+      status: req.status ?? null,
+      fromCache: req.fromCache ?? false,
+    });
+  }
+  cdpRequests.sort((a, b) => b.durationMs - a.durationMs);
+
   const networkData = {
     requestsTotal: session.requestsTotal,
     transferredBytes: session.transferredBytes,
     cacheHitRate,
     failures: session.failures,
     byDomain: domainList,
-    byType: [],   // filled from page resource timing
-    slowest: [],  // filled from page resource timing
+    byType: Object.values(byTypeMap),
+    slowest: cdpRequests.slice(0, 10),
   };
 
   return { pageMetrics, networkData, traceInfo };
