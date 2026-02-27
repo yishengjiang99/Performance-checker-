@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Performance Checker</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <div class="logo">⚡ Performance Checker</div>
+    <div id="url-badge" class="url-badge" title=""></div>
+    <div class="local-only">🔒 Local only</div>
+  </header>
+
+  <!-- Controls -->
+  <section class="controls">
+    <label class="toggle-label">
+      <input type="checkbox" id="cold-load-toggle" />
+      <span>Cold load <small>(reload + bypass cache)</small></span>
+    </label>
+    <label class="toggle-label">
+      <input type="checkbox" id="trace-toggle" />
+      <span>Capture trace</span>
+    </label>
+    <div class="btn-row">
+      <button id="btn-start" class="btn btn-start">▶ Start</button>
+      <button id="btn-stop"  class="btn btn-stop"  disabled>■ Stop</button>
+    </div>
+    <div id="status-msg" class="status-msg"></div>
+  </section>
+
+  <!-- Results (hidden until a report is ready) -->
+  <section id="results" class="results hidden">
+
+    <!-- Scorecard -->
+    <div class="section-title">Scorecard</div>
+    <div class="scorecard" id="scorecard"></div>
+
+    <!-- Timeline bar -->
+    <div class="section-title">Timeline</div>
+    <div class="timeline-wrap">
+      <div class="timeline-bar" id="timeline-bar"></div>
+      <div class="timeline-labels" id="timeline-labels"></div>
+    </div>
+
+    <!-- Insights -->
+    <div class="section-title">Insights</div>
+    <ul class="insights-list" id="insights-list"></ul>
+
+    <!-- Requests by type -->
+    <div class="section-title">Requests by Type</div>
+    <table id="tbl-by-type" class="data-table">
+      <thead><tr><th>Type</th><th>Reqs</th><th>Size</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <!-- Top domains -->
+    <div class="section-title">Top Domains by Bytes</div>
+    <table id="tbl-domains" class="data-table">
+      <thead><tr><th>Domain</th><th>Reqs</th><th>Size</th><th>3P?</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <!-- Slowest resources -->
+    <div class="section-title">Slowest Resources (top 10)</div>
+    <table id="tbl-slowest" class="data-table">
+      <thead><tr><th>URL</th><th>Type</th><th>Duration</th><th>Size</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <!-- Delta comparison -->
+    <div id="delta-section" class="hidden">
+      <div class="section-title">vs. Previous Run</div>
+      <div class="scorecard" id="scorecard-delta"></div>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button id="btn-export" class="btn btn-secondary">⬇ Export JSON</button>
+      <button id="btn-history" class="btn btn-secondary">📋 History</button>
+    </div>
+
+    <!-- Trace notice -->
+    <div id="trace-notice" class="trace-notice hidden"></div>
+
+  </section>
+
+  <!-- History panel -->
+  <section id="history-panel" class="hidden">
+    <div class="section-title">
+      Run History
+      <button id="btn-history-back" class="btn btn-secondary btn-sm">✕ Close</button>
+    </div>
+    <div id="history-list"></div>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>
