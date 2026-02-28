@@ -205,12 +205,24 @@ function cdpSend(tabId, method, params = {}) {
 }
 
 async function attachDebugger(tabId) {
-  return new Promise((resolve, reject) => {
-    chrome.debugger.attach({ tabId }, "1.4", () => {
-      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-      else resolve();
-    });
-  });
+  const protocolVersions = ["1.3", "1.2", "1.1"];
+  let lastError = null;
+
+  for (const version of protocolVersions) {
+    try {
+      await new Promise((resolve, reject) => {
+        chrome.debugger.attach({ tabId }, version, () => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          else resolve();
+        });
+      });
+      return;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  throw lastError || new Error("Failed to attach debugger");
 }
 
 async function detachDebugger(tabId) {
