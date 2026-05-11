@@ -1,6 +1,6 @@
 # Performance Checker — Chrome Extension
 
-A **Manifest V3** Chrome Extension that measures page performance on-demand. Click **Start**, interact with the page, click **Stop** — and get a complete performance report including LCP, INP, CLS, TTFB, FCP, network breakdowns, and actionable insights.
+A **Manifest V3** Chrome Extension that measures page performance on-demand. Click **Run audit**, interact with the page, click **Finish and report** — and get a complete performance report including LCP, INP, CLS, TTFB, FCP, network breakdowns, and actionable insights.
 
 ---
 
@@ -58,12 +58,12 @@ Performance-checker-/
 
 1. Navigate to any HTTPS page (e.g. `https://example.com`).
 2. Click the **Performance Checker** icon in the toolbar.
-3. *(Optional)* Check **Cold load** to reload with cache bypass, or **Capture trace** to record a CDP trace.
-4. Click **▶ Start**.
+3. *(Optional)* Check **Cold load** to reload with cache bypass, or **Trace** to record a CDP trace.
+4. Click **Run audit**.
 5. Interact with the page (scroll, click, etc.) to capture INP/CLS data.
-6. Click **■ Stop**.
+6. Click **Finish and report**.
 7. View the scorecard, timeline, insights, and tables.
-8. Click **⬇ Export JSON** to download the full report.
+8. Click **Export JSON** to download the full report.
 
 ### Notes on Cold load
 
@@ -71,7 +71,7 @@ The Cold load toggle calls `chrome.tabs.reload({ bypassCache: true })` (and atte
 
 ### Notes on Trace capture
 
-When **Capture trace** is enabled, the extension starts a CDP `Tracing.start` session with categories `devtools.timeline, loading, blink.user_timing, v8.execute`. After stop, the trace is available for download as a `trace.json` file that can be loaded in `chrome://tracing` or the **Performance** tab of DevTools.
+When **Trace** is enabled, the extension starts a CDP `Tracing.start` session with categories `devtools.timeline, loading, blink.user_timing, v8.execute`. After the run finishes, the trace is available for download as a `trace.json` file that can be loaded in `chrome://tracing` or the **Performance** tab of DevTools.
 
 ---
 

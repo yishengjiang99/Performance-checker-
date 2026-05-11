@@ -141,8 +141,7 @@ const $ = id => document.getElementById(id);
 const urlBadge       = $("url-badge");
 const coldToggle     = $("cold-load-toggle");
 const traceToggle    = $("trace-toggle");
-const btnStart       = $("btn-start");
-const btnStop        = $("btn-stop");
+const btnRun         = $("btn-run");
 const statusMsg      = $("status-msg");
 const resultsSection = $("results");
 const scorecardEl    = $("scorecard");
@@ -163,6 +162,7 @@ const traceNotice    = $("trace-notice");
 let activeTabId = null;
 let currentReport = null;
 let currentOrigin = null;
+let isRunning = false;
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 
@@ -189,11 +189,19 @@ function getOrigin(url) {
   catch (_) { return url; }
 }
 
-// ── Buttons ────────────────────────────────────────────────────────────────────
+// ── Main action ────────────────────────────────────────────────────────────────
 
-btnStart.addEventListener("click", async () => {
+btnRun.addEventListener("click", async () => {
+  if (isRunning) {
+    await stopMeasurement();
+  } else {
+    await startMeasurement();
+  }
+});
+
+async function startMeasurement() {
   setStatus("Starting…");
-  btnStart.disabled = true;
+  btnRun.disabled = true;
 
   const resp = await sendMessage({
     type: "START",
@@ -203,20 +211,20 @@ btnStart.addEventListener("click", async () => {
 
   if (!resp || !resp.ok) {
     setStatus(resp?.error ?? "Failed to start.", true);
-    btnStart.disabled = false;
+    btnRun.disabled = false;
     return;
   }
 
   activeTabId = resp.tabId;
   setRunning(true);
-  setStatus(coldToggle.checked ? "Cold load in progress…" : "Measuring… click Stop when done.");
-});
+  setStatus(coldToggle.checked ? "Reloading without cache, then measuring…" : "Measuring. Interact with the page, then finish.");
+}
 
-btnStop.addEventListener("click", async () => {
+async function stopMeasurement() {
   if (!activeTabId) { setStatus("No active tab.", true); return; }
 
   setStatus("Collecting results…");
-  btnStop.disabled = true;
+  btnRun.disabled = true;
 
   const resp = await sendMessage({ type: "STOP", tabId: activeTabId });
 
@@ -252,7 +260,7 @@ btnStop.addEventListener("click", async () => {
   const prevReport = history.length > 1 ? history[1] : null;
 
   renderReport(report, prevReport);
-});
+}
 
 // ── Render report ──────────────────────────────────────────────────────────────
 
@@ -436,7 +444,7 @@ function renderTraceNotice(trace) {
     return;
   }
   traceNotice.classList.remove("hidden");
-  traceNotice.innerHTML = `📊 Trace captured (${formatBytes(trace.sizeBytes)}). <button id="btn-dl-trace" class="btn btn-secondary btn-sm">⬇ Download Trace</button>`;
+  traceNotice.innerHTML = `Trace captured (${formatBytes(trace.sizeBytes)}). <button id="btn-dl-trace" class="text-action">Download trace</button>`;
   document.getElementById("btn-dl-trace").onclick = () => {
     if (trace.chunks) {
       const blob = new Blob(
@@ -559,8 +567,11 @@ function sendMessage(msg) {
 }
 
 function setRunning(running) {
-  btnStart.disabled = running;
-  btnStop.disabled  = !running;
+  isRunning = running;
+  btnRun.disabled = false;
+  btnRun.classList.toggle("is-running", running);
+  btnRun.querySelector(".run-kicker").textContent = running ? "Measuring" : "Ready";
+  btnRun.querySelector(".run-label").textContent = running ? "Finish and report" : "Run audit";
   coldToggle.disabled = running;
   traceToggle.disabled = running;
 }
